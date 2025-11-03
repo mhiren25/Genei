@@ -89,7 +89,9 @@ class AlgoType(str, Enum):
 
 class TraderTextParsed(BaseModel):
     """Pydantic model for parsed trader text - returned by LangGraph backend"""
-    structured: str = Field(..., description="Human-readable structured format")
+    structured: str = Field(..., description="Human-readable structured format for display")
+    backend_format: str = Field(..., description="Machine-readable format for backend automation")
+    description: str = Field(..., description="Detailed explanation of the execution strategy")
     algo: Optional[AlgoType] = Field(None, description="Detected algorithm type")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Extracted parameters")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Parsing confidence score")
@@ -131,6 +133,8 @@ class TraderTextState(TypedDict):
     detected_algo: Optional[str]
     parameters: Dict[str, Any]
     structured_output: str
+    backend_format: str
+    description: str
     confidence: float
     reasoning: str
 
@@ -288,38 +292,125 @@ Example: {{"end_time": "16:00", "include_auctions": true}}"""
     return state
 
 def generate_structured_output(state: TraderTextState) -> TraderTextState:
-    """Step 4: Generate human-readable structured output"""
+    """Step 4: Generate human-readable structured output, backend format, and description using LLM"""
     algo = state["detected_algo"]
     params = state["parameters"]
     
     if not algo:
         state["structured_output"] = f"Custom execution: {state['input_text']}"
+        state["backend_format"] = f"CUSTOM|{state['input_text']}"
+        state["description"] = "Custom execution strategy without a predefined algorithm."
         state["confidence"] = 0.5
         return state
     
-    # Generate structured output based on algorithm
-    if algo == "vwap":
-        end_time = params.get("end_time", "16:00")
-        auctions = " on all auctions" if params.get("include_auctions") else ""
-        state["structured_output"] = f"VWAP Market Close [{end_time}]{auctions}"
-        state["confidence"] = 0.95
+    if not LLM_AVAILABLE:
+        # Fallback generation
+        if algo == "vwap":
+            end_time = params.get("end_time", "16:00")
+            auctions = " on all auctions" if params.get("include_auctions") else ""
+            state["structured_output"] = f"VWAP Market Close [{end_time}]{auctions}"
+            state["backend_format"] = f"VWAP|END={end_time}|AUCTIONS={params.get('include_auctions', False)}"
+            state["description"] = "Execute order throughout the day to match the volume-weighted average price, minimizing market impact."
+            state["confidence"] = 0.95
+            
+        elif algo == "twap":
+            duration = params.get("duration", "full day")
+            state["structured_output"] = f"TWAP execution over {duration}"
+            state["backend_format"] = f"TWAP|DURATION={duration}|SLICES={params.get('slices', 60)}"
+            state["description"] = "Distribute order evenly over the specified time period to avoid timing bias."
+            state["confidence"] = 0.92
+            
+        elif algo == "pov":
+            rate = params.get("participation_rate", "10%")
+            state["structured_output"] = f"POV {rate} participation rate"
+            state["backend_format"] = f"POV|RATE={rate}|MIN={params.get('min_rate', '8%')}|MAX={params.get('max_rate', '12%')}"
+            state["description"] = "Execute as a percentage of market volume to follow natural market rhythm."
+            state["confidence"] = 0.90
+            
+        elif algo == "implementation_shortfall":
+            urgency = params.get("urgency", "medium")
+            state["structured_output"] = f"Implementation Shortfall - {urgency.capitalize()} urgency profile"
+            state["backend_format"] = f"IS|URGENCY={urgency}|RISK={params.get('risk_aversion', 'medium')}"
+            state["description"] = "Balance execution urgency with market impact costs dynamically."
+            state["confidence"] = 0.88
+        else:
+            state["structured_output"] = f"Custom execution: {state['input_text']}"
+            state["backend_format"] = f"CUSTOM|{state['input_text']}"
+            state["description"] = "Custom execution strategy"
+            state["confidence"] = 0.7
         
-    elif algo == "twap":
-        duration = params.get("duration", "full day")
-        state["structured_output"] = f"TWAP execution over {duration}"
-        state["confidence"] = 0.92
+        return state
+    
+    # Use Azure OpenAI to generate all three formats
+    prompt = f"""You are a financial trading system. Generate three different formats for the following trader instruction.
+
+Trader Instruction: "{state['input_text']}"
+Detected Algorithm: {algo.upper()}
+Parameters: {params}
+
+Generate:
+1. STRUCTURED: A human-readable, concise format for display to traders (1 line)
+2. BACKEND: A machine-readable format for backend automation (pipe-separated key=value format)
+3. DESCRIPTION: A detailed 2-3 sentence explanation of what this execution strategy does and why it's beneficial
+
+Format your response EXACTLY as:
+STRUCTURED: [one line description]
+BACKEND: [ALGO|PARAM1=value1|PARAM2=value2]
+DESCRIPTION: [2-3 sentences explaining the strategy]
+
+Example:
+STRUCTURED: VWAP Market Close [16:00] with auction participation
+BACKEND: VWAP|END=16:00|AUCTIONS=true|START=09:30
+DESCRIPTION: This strategy executes the order throughout the trading day to match the volume-weighted average price, reducing market impact. By including auction participation, the order can capture additional liquidity at market open and close. This is ideal for large institutional orders that need to minimize slippage."""
+
+    try:
+        response = azure_client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT,
+            messages=[
+                {"role": "system", "content": "You are a financial trading execution expert. Always follow the exact format requested."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=400
+        )
         
-    elif algo == "pov":
-        rate = params.get("participation_rate", "10%")
-        state["structured_output"] = f"POV {rate} participation rate"
-        state["confidence"] = 0.90
+        result = response.choices[0].message.content.strip()
         
-    elif algo == "implementation_shortfall":
-        urgency = params.get("urgency", "medium")
-        state["structured_output"] = f"Implementation Shortfall - {urgency.capitalize()} urgency profile"
-        state["confidence"] = 0.88
-    else:
-        state["structured_output"] = f"Custom execution: {state['input_text']}"
+        # Parse the three formats
+        structured_match = re.search(r'STRUCTURED:\s*(.+?)(?:\n|$)', result, re.IGNORECASE)
+        backend_match = re.search(r'BACKEND:\s*(.+?)(?:\n|$)', result, re.IGNORECASE)
+        description_match = re.search(r'DESCRIPTION:\s*(.+?)(?:\n\n|\Z)', result, re.IGNORECASE | re.DOTALL)
+        
+        if structured_match:
+            state["structured_output"] = structured_match.group(1).strip()
+        else:
+            state["structured_output"] = f"{algo.upper()} execution strategy"
+            
+        if backend_match:
+            state["backend_format"] = backend_match.group(1).strip()
+        else:
+            state["backend_format"] = f"{algo.upper()}|{str(params)}"
+            
+        if description_match:
+            state["description"] = description_match.group(1).strip()
+        else:
+            state["description"] = "Automated execution strategy based on trader instructions."
+        
+        # Set confidence based on algo type
+        confidence_map = {
+            "vwap": 0.95,
+            "twap": 0.92,
+            "pov": 0.90,
+            "implementation_shortfall": 0.88
+        }
+        state["confidence"] = confidence_map.get(algo, 0.75)
+        
+    except Exception as e:
+        print(f"Error generating structured output: {e}")
+        # Fallback to basic generation
+        state["structured_output"] = f"{algo.upper()} execution strategy"
+        state["backend_format"] = f"{algo.upper()}|{str(params)}"
+        state["description"] = f"Execute using {algo.upper()} algorithm with specified parameters."
         state["confidence"] = 0.7
     
     return state
@@ -596,6 +687,8 @@ async def parse_trader_text_endpoint(request: TraderTextRequest):
             detected_algo=None,
             parameters={},
             structured_output="",
+            backend_format="",
+            description="",
             confidence=0.0,
             reasoning=""
         )
@@ -606,6 +699,8 @@ async def parse_trader_text_endpoint(request: TraderTextRequest):
         # Return parsed result
         return TraderTextParsed(
             structured=final_state["structured_output"],
+            backend_format=final_state["backend_format"],
+            description=final_state["description"],
             algo=AlgoType(final_state["detected_algo"]) if final_state["detected_algo"] else None,
             parameters=final_state["parameters"],
             confidence=final_state["confidence"],
