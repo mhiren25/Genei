@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Send, CheckCircle, AlertCircle, Clock, X, Loader2 } from 'lucide-react';
+import { Search, Send, CheckCircle, AlertCircle, Clock, X, Loader2, Info, Code, FileText } from 'lucide-react';
 
 // Backend API configuration
 const API_BASE_URL = 'http://localhost:8000';
@@ -130,6 +130,8 @@ const apiService = {
     if (lowerText.includes('vwap')) {
       return {
         structured: 'VWAP Market Close [16:00]',
+        backend_format: 'VWAP|END=16:00|AUCTIONS=false|START=09:30',
+        description: 'Execute order throughout the day to match the volume-weighted average price, minimizing market impact on large orders.',
         algo: 'vwap',
         parameters: { end_time: '16:00' },
         confidence: 0.9
@@ -139,6 +141,8 @@ const apiService = {
     if (lowerText.includes('twap')) {
       return {
         structured: 'TWAP execution over trading day',
+        backend_format: 'TWAP|DURATION=full day|SLICES=60',
+        description: 'Distribute order evenly over the specified time period to avoid timing bias and minimize market impact.',
         algo: 'twap',
         parameters: { duration: 'full day' },
         confidence: 0.9
@@ -147,6 +151,8 @@ const apiService = {
     
     return {
       structured: `Custom execution: ${text}`,
+      backend_format: `CUSTOM|${text}`,
+      description: 'Custom execution strategy without a predefined algorithm.',
       algo: null,
       parameters: {},
       confidence: 0.5
@@ -183,7 +189,10 @@ export default function UBSOmsInterface() {
   const [traderTextSuggestion, setTraderTextSuggestion] = useState('');
   const [isTraderTextLoading, setIsTraderTextLoading] = useState(false);
   const [structuredTraderText, setStructuredTraderText] = useState('');
+  const [backendFormat, setBackendFormat] = useState('');
+  const [traderTextDescription, setTraderTextDescription] = useState('');
   const [detectedAlgo, setDetectedAlgo] = useState(null);
+  const [showTraderTextTooltip, setShowTraderTextTooltip] = useState(false);
   const debounceTimer = useRef(null);
   const traderTextRef = useRef(null);
 
@@ -255,6 +264,8 @@ export default function UBSOmsInterface() {
     if (orderForm.traderText.trim().length < 2) {
       setTraderTextSuggestion('');
       setStructuredTraderText('');
+      setBackendFormat('');
+      setTraderTextDescription('');
       setDetectedAlgo(null);
       return;
     }
@@ -278,12 +289,16 @@ export default function UBSOmsInterface() {
         // Parse with backend (LangGraph simulation)
         const result = await apiService.parseTraderText(orderForm.traderText);
         setStructuredTraderText(result.structured);
+        setBackendFormat(result.backend_format || result.structured);
+        setTraderTextDescription(result.description || 'Execution strategy parsed by AI');
         setDetectedAlgo(result.algo);
         
       } catch (error) {
         console.error('Error processing trader text:', error);
         setTraderTextSuggestion('');
         setStructuredTraderText('');
+        setBackendFormat('');
+        setTraderTextDescription('');
         setDetectedAlgo(null);
       } finally {
         setIsTraderTextLoading(false);
@@ -512,7 +527,7 @@ export default function UBSOmsInterface() {
               
               const confirmMessage = {
                 type: 'assistant',
-                message: `📊 Backend parsed your trader text:\n"${structuredTraderText}"\n\nI recommend using ${algo?.name} for this order.\n\nWould you like to proceed?`,
+                message: `📊 Backend parsed your trader text:\n\n🎯 Display: "${structuredTraderText}"\n\n💻 Backend: ${backendFormat}\n\n📝 Strategy: ${traderTextDescription}\n\nI recommend using ${algo?.name} for this order.\n\nWould you like to proceed?`,
                 timestamp: new Date().toISOString(),
                 hasAction: true,
                 actionType: 'confirm_algo'
@@ -647,11 +662,15 @@ Contact Method: ${orderForm.contactMethod.charAt(0).toUpperCase() + orderForm.co
 ${algo ? `🤖 EXECUTION ALGORITHM
 Algorithm: ${algo.name}
 Strategy: ${algo.description}
-${structuredTraderText ? `Parsed Instructions: ${structuredTraderText}` : ''}
+
+📝 AI-PARSED TRADER INSTRUCTIONS:
+Display Format: ${structuredTraderText}
+Backend Format: ${backendFormat}
+Description: ${traderTextDescription}
 
 ─────────────────────────────────
 ` : ''}
-${orderForm.traderText ? `📝 TRADER NOTES
+${orderForm.traderText ? `📝 ORIGINAL TRADER NOTES
 ${orderForm.traderText}
 
 ─────────────────────────────────
@@ -661,10 +680,11 @@ ${orderForm.traderText}
 ✓ Compliance checks passed
 ✓ Trade recorded in system
 ✓ Pydantic validation completed
+✓ LangGraph workflow executed
 
 ═══════════════════════════════════
 
-Thank you for using UBS Order Management System powered by Genei AI with FastAPI Backend.
+Thank you for using UBS Order Management System powered by Genei AI with Azure OpenAI & LangGraph.
         `,
         timestamp: new Date().toISOString()
       };
@@ -1052,11 +1072,35 @@ Thank you for using UBS Order Management System powered by Genei AI with FastAPI
                       <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
                         G
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <div className="font-semibold text-gray-800 mb-1">Algo Detected</div>
-                        <div className="text-sm text-gray-700">{aiSuggestion.message}</div>
-                        <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-800">
-                          <strong>Backend Parsed:</strong> {structuredTraderText}
+                        <div className="text-sm text-gray-700 mb-3">{aiSuggestion.message}</div>
+                        
+                        {/* Display all three formats */}
+                        <div className="space-y-2 mb-3">
+                          <div className="p-2 bg-green-50 rounded border border-green-200">
+                            <div className="text-xs font-semibold text-green-800 mb-1 flex items-center gap-1">
+                              <FileText size={12} />
+                              Display Format
+                            </div>
+                            <div className="text-xs text-green-700">{structuredTraderText}</div>
+                          </div>
+                          
+                          <div className="p-2 bg-blue-50 rounded border border-blue-200">
+                            <div className="text-xs font-semibold text-blue-800 mb-1 flex items-center gap-1">
+                              <Code size={12} />
+                              Backend Format
+                            </div>
+                            <div className="text-xs text-blue-700 font-mono break-all">{backendFormat}</div>
+                          </div>
+                          
+                          <div className="p-2 bg-purple-50 rounded border border-purple-200">
+                            <div className="text-xs font-semibold text-purple-800 mb-1 flex items-center gap-1">
+                              <Info size={12} />
+                              Description
+                            </div>
+                            <div className="text-xs text-purple-700">{traderTextDescription}</div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1226,19 +1270,32 @@ Thank you for using UBS Order Management System powered by Genei AI with FastAPI
                     )}
                     
                     {msg.hasAction && msg.actionType === 'confirm_algo' && aiSuggestion?.action === 'confirm_algo' && (
-                      <div className="flex gap-2 mt-3">
-                        <button
-                          onClick={() => handleAiSuggestion(true)}
-                          className="flex-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs font-medium"
-                        >
-                          ✓ Confirm {ALGO_SUGGESTIONS.find(a => a.id === aiSuggestion.algo)?.name}
-                        </button>
-                        <button
-                          onClick={() => handleAiSuggestion(false)}
-                          className="flex-1 px-3 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-xs font-medium"
-                        >
-                          Choose Different
-                        </button>
+                      <div className="mt-3">
+                        {/* Show parsed formats */}
+                        <div className="mb-3 p-2 bg-white rounded border border-gray-200 space-y-1">
+                          <div className="text-xs">
+                            <span className="font-semibold text-green-700">Display:</span>
+                            <span className="ml-1 text-gray-700">{structuredTraderText}</span>
+                          </div>
+                          <div className="text-xs">
+                            <span className="font-semibold text-blue-700">Backend:</span>
+                            <span className="ml-1 text-gray-700 font-mono text-[10px]">{backendFormat}</span>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleAiSuggestion(true)}
+                            className="flex-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs font-medium"
+                          >
+                            ✓ Confirm {ALGO_SUGGESTIONS.find(a => a.id === aiSuggestion.algo)?.name}
+                          </button>
+                          <button
+                            onClick={() => handleAiSuggestion(false)}
+                            className="flex-1 px-3 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-xs font-medium"
+                          >
+                            Choose Different
+                          </button>
+                        </div>
                       </div>
                     )}
                     
