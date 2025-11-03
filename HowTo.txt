@@ -1,0 +1,522 @@
+# UBS OMS - Azure OpenAI & LangGraph Integration Guide
+
+## 🚀 Overview
+Production-ready backend with:
+- **Azure OpenAI GPT-4** for intelligent order parsing
+- **LangGraph** for multi-step trader text workflows
+- **Pydantic** models for type-safe data validation
+- **Graceful fallbacks** when LLM unavailable
+
+## 📋 Prerequisites
+
+### 1. Azure OpenAI Setup
+
+#### Create Azure OpenAI Resource
+```bash
+# Using Azure CLI
+az cognitiveservices account create \
+  --name ubs-oms-openai \
+  --resource-group your-resource-group \
+  --location eastus \
+  --kind OpenAI \
+  --sku S0
+```
+
+#### Deploy GPT-4 Model
+1. Go to Azure OpenAI Studio: https://oai.azure.com/
+2. Navigate to "Deployments"
+3. Click "Create new deployment"
+4. Select model: **gpt-4** or **gpt-4o** (recommended) or **gpt-35-turbo** (cost-effective)
+5. Name your deployment: `gpt-4-ubs-oms`
+6. Deploy
+
+#### Get Your Credentials
+```bash
+# Get endpoint
+az cognitiveservices account show \
+  --name ubs-oms-openai \
+  --resource-group your-resource-group \
+  --query "properties.endpoint"
+
+# Get API key
+az cognitiveservices account keys list \
+  --name ubs-oms-openai \
+  --resource-group your-resource-group \
+  --query "key1"
+```
+
+### 2. Environment Variables
+
+Create a `.env` file:
+```bash
+# Azure OpenAI Configuration
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_KEY=your-api-key-here
+AZURE_OPENAI_DEPLOYMENT=gpt-4-ubs-oms
+AZURE_OPENAI_API_VERSION=2024-02-15-preview
+```
+
+Or set as environment variables:
+```bash
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
+export AZURE_OPENAI_API_KEY="your-api-key-here"
+export AZURE_OPENAI_DEPLOYMENT="gpt-4-ubs-oms"
+export AZURE_OPENAI_API_VERSION="2024-02-15-preview"
+```
+
+## 📦 Installation
+
+### Requirements
+Create `requirements.txt`:
+```txt
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+openai==1.12.0
+langgraph==0.0.26
+langchain==0.1.9
+python-dotenv==1.0.0
+```
+
+### Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### Alternative: Using Poetry
+```bash
+poetry add fastapi uvicorn pydantic openai langgraph langchain python-dotenv
+```
+
+## 🏃 Running the Backend
+
+### With Environment File
+```bash
+# Load .env file
+python -m dotenv run python backend.py
+```
+
+### Direct Execution
+```bash
+python backend.py
+```
+
+### Using Uvicorn
+```bash
+uvicorn backend:app --reload --host 0.0.0.0 --port 8000
+```
+
+### With Docker
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend.py .
+EXPOSE 8000
+
+CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+```bash
+docker build -t ubs-oms-backend .
+docker run -p 8000:8000 \
+  -e AZURE_OPENAI_ENDPOINT="your-endpoint" \
+  -e AZURE_OPENAI_API_KEY="your-key" \
+  -e AZURE_OPENAI_DEPLOYMENT="gpt-4-ubs-oms" \
+  ubs-oms-backend
+```
+
+## 🔄 LangGraph Workflow
+
+### Trader Text Processing Pipeline
+
+```mermaid
+graph LR
+    A[Input Text] --> B[Normalize]
+    B --> C[Detect Algorithm]
+    C --> D[Extract Parameters]
+    D --> E[Generate Structured Output]
+    E --> F[Return Result]
+```
+
+### Workflow Steps
+
+1. **Normalize Input**
+   - Clean and lowercase text
+   - Remove extra whitespace
+
+2. **Detect Algorithm** (Azure OpenAI)
+   - Uses GPT-4 to identify trading algorithm
+   - Returns: vwap, twap, pov, implementation_shortfall, or none
+   - Includes reasoning for decision
+
+3. **Extract Parameters** (Azure OpenAI)
+   - Algorithm-specific parameter extraction
+   - Returns structured JSON with parameters
+   - Examples:
+     - VWAP: `{end_time, include_auctions}`
+     - TWAP: `{duration, number_of_slices}`
+     - POV: `{participation_rate, min_rate, max_rate}`
+
+4. **Generate Structured Output**
+   - Create human-readable structured format
+   - Calculate confidence score
+   - Return final parsed result
+
+## 🧪 Testing the API
+
+### Health Check
+```bash
+curl http://localhost:8000/api/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "azure_openai": {
+    "available": true,
+    "endpoint": "https://your-resource.openai.azure.com/",
+    "deployment": "gpt-4-ubs-oms"
+  },
+  "langgraph": {
+    "available": true,
+    "workflow_nodes": ["normalize", "detect_algo", "extract_params", "generate_output"]
+  }
+}
+```
+
+### Parse Order with Azure OpenAI
+```bash
+curl -X POST "http://localhost:8000/api/parse-order" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Buy 100 shares of AAPL at $180 as a GTC order via email"
+  }'
+```
+
+**Response:**
+```json
+{
+  "security": {
+    "symbol": "AAPL",
+    "market": "NASDAQ",
+    "currency": "USD",
+    "name": "Apple Inc.",
+    "price": 178.50
+  },
+  "contact_method": "email",
+  "quantity": 100,
+  "price": 180.0,
+  "time_in_force": "GTC",
+  "gtd_date": null,
+  "trader_text": ""
+}
+```
+
+### Parse Trader Text with LangGraph
+```bash
+curl -X POST "http://localhost:8000/api/parse-trader-text" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "VWAP Market Close with auctions"
+  }'
+```
+
+**Response:**
+```json
+{
+  "structured": "VWAP Market Close [16:00] on all auctions",
+  "algo": "vwap",
+  "parameters": {
+    "end_time": "16:00",
+    "include_auctions": true,
+    "start_time": "09:30"
+  },
+  "confidence": 0.95,
+  "reasoning": "Detected VWAP algorithm with auction participation based on explicit mention"
+}
+```
+
+### Autocomplete with Azure OpenAI
+```bash
+curl -X POST "http://localhost:8000/api/autocomplete" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "VWAP"
+  }'
+```
+
+**Response:**
+```json
+[
+  "VWAP Market Close execution by end of day"
+]
+```
+
+## 🎯 Key Features
+
+### 1. Azure OpenAI Integration
+- **Model**: GPT-4 (or GPT-4o for better performance)
+- **Temperature**: 0.2-0.4 for consistent outputs
+- **Prompts**: Engineered for financial domain
+- **JSON Mode**: Structured responses only
+
+### 2. LangGraph Workflow
+- **State Management**: Type-safe state with TypedDict
+- **Multi-Step Processing**: 4-stage pipeline
+- **Error Handling**: Graceful degradation
+- **Observability**: Each step logged and traceable
+
+### 3. Graceful Fallbacks
+- **LLM Unavailable**: Falls back to rule-based parsing
+- **Network Issues**: Returns cached/default responses
+- **Partial Data**: Continues workflow with available data
+
+### 4. Production-Ready
+- **Async API**: FastAPI with async endpoints
+- **Type Safety**: Pydantic validation throughout
+- **CORS**: Configured for frontend integration
+- **OpenAPI Docs**: Auto-generated at `/docs`
+
+## 📊 Example Workflows
+
+### Example 1: Natural Language Order
+**Input:** `"Buy 200 shares of Microsoft at market price as a day order"`
+
+**Azure OpenAI Processing:**
+```
+1. Parse intent: BUY order
+2. Extract security: MSFT (Microsoft Corporation)
+3. Extract quantity: 200 shares
+4. Extract price: null (market order)
+5. Extract TiF: DAY
+6. Return structured OrderFormModel
+```
+
+### Example 2: Complex Trader Text
+**Input:** `"Execute using TWAP over 3 hours starting at market open"`
+
+**LangGraph Workflow:**
+```
+Step 1 - Normalize:
+  "execute using twap over 3 hours starting at market open"
+
+Step 2 - Detect Algorithm (Azure OpenAI):
+  Algorithm: TWAP
+  Reason: "User explicitly requested TWAP execution strategy"
+
+Step 3 - Extract Parameters (Azure OpenAI):
+  {
+    "duration": "3 hours",
+    "start_time": "09:30",
+    "number_of_slices": 36
+  }
+
+Step 4 - Generate Output:
+  "TWAP execution over 3 hours"
+  Confidence: 0.92
+```
+
+## 🔧 Configuration Options
+
+### Model Selection
+```python
+# Fastest (cost-effective)
+AZURE_OPENAI_DEPLOYMENT = "gpt-35-turbo"
+
+# Balanced (recommended)
+AZURE_OPENAI_DEPLOYMENT = "gpt-4"
+
+# Most capable
+AZURE_OPENAI_DEPLOYMENT = "gpt-4o"
+```
+
+### Temperature Settings
+```python
+# More deterministic (recommended for production)
+temperature = 0.2
+
+# Balanced
+temperature = 0.4
+
+# More creative
+temperature = 0.7
+```
+
+### Timeout Configuration
+```python
+azure_client = AzureOpenAI(
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_key=AZURE_OPENAI_API_KEY,
+    api_version=AZURE_OPENAI_API_VERSION,
+    timeout=30.0,  # 30 seconds
+    max_retries=3
+)
+```
+
+## 🐛 Troubleshooting
+
+### Azure OpenAI Connection Issues
+```python
+# Test connection
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint="https://your-resource.openai.azure.com/",
+    api_key="your-key",
+    api_version="2024-02-15-preview"
+)
+
+response = client.chat.completions.create(
+    model="your-deployment-name",
+    messages=[{"role": "user", "content": "test"}]
+)
+print(response.choices[0].message.content)
+```
+
+### Common Errors
+
+**Error: "Invalid API Key"**
+```bash
+# Verify your key
+az cognitiveservices account keys list \
+  --name ubs-oms-openai \
+  --resource-group your-resource-group
+```
+
+**Error: "Deployment not found"**
+- Check deployment name matches `AZURE_OPENAI_DEPLOYMENT`
+- Verify deployment is active in Azure OpenAI Studio
+
+**Error: "Rate limit exceeded"**
+- Implement exponential backoff
+- Increase quota in Azure portal
+- Add caching layer
+
+### Fallback Mode Testing
+```bash
+# Test without Azure OpenAI (fallback mode)
+unset AZURE_OPENAI_API_KEY
+python backend.py
+
+# API still works with rule-based parsing
+```
+
+## 📈 Monitoring & Observability
+
+### Logging
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# LangGraph automatically logs each step
+```
+
+### Metrics to Track
+- Azure OpenAI API calls per minute
+- Average response time
+- Cache hit rate
+- Fallback usage percentage
+- Parsing accuracy
+
+### Azure Application Insights Integration
+```python
+from opencensus.ext.azure.log_exporter import AzureLogHandler
+
+logger = logging.getLogger(__name__)
+logger.addHandler(AzureLogHandler(
+    connection_string='InstrumentationKey=your-key'
+))
+```
+
+## 💰 Cost Optimization
+
+### Token Usage
+- **GPT-4**: ~$0.03 per 1K input tokens, ~$0.06 per 1K output tokens
+- **GPT-4o**: ~$0.005 per 1K input tokens, ~$0.015 per 1K output tokens
+- **GPT-3.5**: ~$0.0015 per 1K input tokens, ~$0.002 per 1K output tokens
+
+### Optimization Strategies
+1. **Cache frequent queries** (Redis/Memcached)
+2. **Use GPT-3.5 for simple tasks**
+3. **Implement request deduplication**
+4. **Set max_tokens limits**
+5. **Use streaming for long responses**
+
+## 🔐 Security Best Practices
+
+1. **Never commit API keys** to version control
+2. **Use Azure Key Vault** for production secrets
+3. **Implement rate limiting** (e.g., 100 req/min per user)
+4. **Add authentication** (JWT tokens, OAuth2)
+5. **Sanitize user inputs** before sending to LLM
+6. **Log and monitor** all API calls
+
+## 🚀 Production Deployment
+
+### Azure App Service
+```bash
+az webapp up \
+  --name ubs-oms-backend \
+  --resource-group your-resource-group \
+  --runtime "PYTHON:3.11" \
+  --sku B1
+
+# Configure app settings
+az webapp config appsettings set \
+  --name ubs-oms-backend \
+  --resource-group your-resource-group \
+  --settings \
+    AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/" \
+    AZURE_OPENAI_DEPLOYMENT="gpt-4-ubs-oms"
+```
+
+### Kubernetes
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ubs-oms-backend
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: backend
+        image: ubs-oms-backend:latest
+        env:
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: endpoint
+        - name: AZURE_OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: api-key
+```
+
+## 📚 Additional Resources
+
+- [Azure OpenAI Documentation](https://learn.microsoft.com/en-us/azure/ai-services/openai/)
+- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Pydantic Documentation](https://docs.pydantic.dev/)
+
+## 🆘 Support
+
+For issues or questions:
+1. Check logs: `tail -f logs/backend.log`
+2. Test health endpoint: `/api/health`
+3. Review Azure OpenAI metrics in Azure Portal
+4. Enable debug logging: `--log-level debug`
