@@ -153,7 +153,7 @@ const apiService = {
 
   parseOrderLocal(text) {
     const inputLower = text.toLowerCase();
-    const parsed = { security: null, quantity: '', timeInForce: 'DAY' };
+    const parsed = { security: null, quantity: null, price: null, time_in_force: 'DAY', contact_method: 'phone' };
     
     const securityMatch = SECURITIES.find(s => 
       inputLower.includes(s.symbol.toLowerCase()) || 
@@ -161,12 +161,61 @@ const apiService = {
     );
     if (securityMatch) parsed.security = securityMatch;
     
-    const qtyMatch = text.match(/(\d+)\s*(shares?|units?)?/);
-    if (qtyMatch) parsed.quantity = qtyMatch[1];
+    // Extract quantity - more patterns
+    const qtyPatterns = [
+      /(\d+)\s*shares?/i,
+      /(\d+)\s*units?/i,
+      /buy\s+(\d+)/i,
+      /sell\s+(\d+)/i,
+      /(\d+)\s+of/i,
+      /(\d+)\s*(?:shares?|units?)?.*(?:of|for)/i
+    ];
+    for (const pattern of qtyPatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        parsed.quantity = parseInt(match[1]);
+        break;
+      }
+    }
     
-    if (inputLower.includes('gtc')) parsed.time_in_force = 'GTC';
-    else if (inputLower.includes('gtd')) parsed.time_in_force = 'GTD';
-    else if (inputLower.includes('fok')) parsed.time_in_force = 'FOK';
+    // Extract price - more patterns including dollar amounts
+    const pricePatterns = [
+      /at\s+\$?(\d+\.?\d*)/i,
+      /price\s+\$?(\d+\.?\d*)/i,
+      /limit\s+\$?(\d+\.?\d*)/i,
+      /\$(\d+\.?\d*)/i,
+      /(\d+\.?\d*)\s*(?:dollars?|usd|per share)/i,
+      /@\s*\$?(\d+\.?\d*)/i
+    ];
+    for (const pattern of pricePatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const price = parseFloat(match[1]);
+        // Only use if it's a reasonable price (not a quantity or year)
+        if (price > 0 && price < 10000) {
+          parsed.price = price;
+          break;
+        }
+      }
+    }
+    
+    // Extract time in force
+    if (inputLower.includes('gtc') || inputLower.includes('good til cancel') || inputLower.includes('good till cancel')) {
+      parsed.time_in_force = 'GTC';
+    } else if (inputLower.includes('gtd') || inputLower.includes('good til date') || inputLower.includes('good till date')) {
+      parsed.time_in_force = 'GTD';
+    } else if (inputLower.includes('fok') || inputLower.includes('fill or kill')) {
+      parsed.time_in_force = 'FOK';
+    }
+    
+    // Extract contact method
+    if (inputLower.includes('email')) {
+      parsed.contact_method = 'email';
+    } else if (inputLower.includes('meeting') || inputLower.includes('in person')) {
+      parsed.contact_method = 'meeting';
+    } else if (inputLower.includes('portal') || inputLower.includes('online')) {
+      parsed.contact_method = 'portal';
+    }
     
     return parsed;
   },
@@ -444,72 +493,95 @@ Would you like me to show more details about any specific holding or account?`;
       let response = '';
       
       if (intent === 'trade') {
-        const mentionedHolding = MOCK_PORTFOLIO.holdings.find(h => 
-          input.toLowerCase().includes(h.symbol.toLowerCase()) || 
-          input.toLowerCase().includes(h.name.toLowerCase())
-        );
-        
-        if (mentionedHolding) {
-          response = `I understand you want to trade ${mentionedHolding.symbol}. Let me take you to the order entry page.\n\nCurrent position: ${mentionedHolding.quantity} shares at $${mentionedHolding.currentPrice}\nUnrealized P&L: $${calculateGainLoss(mentionedHolding).gainLoss.toFixed(2)}`;
+        try {
+          // Parse the order using the API service
+          const parsed = await apiService.parseOrder(input);
+          
+          // Extract trader text/strategy from the input
+          const traderTextKeywords = ['vwap', 'twap', 'pov', 'aggressive', 'urgent', 'market close', 'participation'];
+          let detectedTraderText = '';
+          
+          for (const keyword of traderTextKeywords) {
+            if (input.toLowerCase().includes(keyword)) {
+              // Extract the relevant part containing the strategy
+              const words = input.split(' ');
+              const keywordIndex = words.findIndex(w => w.toLowerCase().includes(keyword));
+              if (keywordIndex !== -1) {
+                // Take a few words around the keyword
+                const start = Math.max(0, keywordIndex - 1);
+                const end = Math.min(words.length, keywordIndex + 4);
+                detectedTraderText = words.slice(start, end).join(' ');
+                break;
+              }
+            }
+          }
+          
+          // If we found common algo patterns, use them
+          if (input.toLowerCase().includes('vwap')) {
+            detectedTraderText = 'VWAP Market Close';
+          } else if (input.toLowerCase().includes('twap')) {
+            detectedTraderText = 'TWAP over 2 hours';
+          } else if (input.toLowerCase().includes('pov') || input.toLowerCase().includes('participation')) {
+            const percentMatch = input.match(/(\d+)\s*%/);
+            detectedTraderText = percentMatch ? `POV ${percentMatch[1]}% participation` : 'POV 10% participation';
+          }
+          
+          const updates = {};
+          if (parsed.security) updates.security = parsed.security;
+          if (parsed.quantity) updates.quantity = parsed.quantity.toString();
+          if (parsed.time_in_force) updates.timeInForce = parsed.time_in_force;
+          if (parsed.price) updates.price = parsed.price.toString();
+          if (parsed.contact_method) updates.contactMethod = parsed.contact_method;
+          if (detectedTraderText) updates.traderText = detectedTraderText;
+          
+          setOrderForm(prev => ({ ...prev, ...updates }));
+
+          response = '✓ Order parsed successfully:\n';
+          if (parsed.security) {
+            response += `\n• Security: ${parsed.security.name} (${parsed.security.symbol})`;
+          }
+          if (parsed.quantity) {
+            response += `\n• Quantity: ${parsed.quantity} shares`;
+          }
+          if (parsed.price) {
+            response += `\n• Price: ${parsed.price}`;
+          } else {
+            response += `\n• Price: Market order`;
+          }
+          if (parsed.time_in_force) {
+            response += `\n• Time in Force: ${parsed.time_in_force}`;
+          }
+          if (detectedTraderText) {
+            response += `\n• Strategy: ${detectedTraderText}`;
+          }
+          response += '\n\nTaking you to order entry...';
           
           const assistantMessage = {
             type: 'assistant',
             message: response,
-            timestamp: new Date().toISOString(),
-            hasAction: true,
-            actionType: 'navigate_to_trade',
-            actionData: { symbol: mentionedHolding.symbol }
+            timestamp: new Date().toISOString()
           };
           setChatHistory(prev => [...prev, assistantMessage]);
           
           setTimeout(() => {
             setCurrentView('orderEntry');
-            const security = SECURITIES.find(s => s.symbol === mentionedHolding.symbol);
-            setOrderForm(prev => ({ ...prev, security }));
-            setSelectedHolding(mentionedHolding);
+            // Check if it's from a portfolio holding
+            const mentionedHolding = MOCK_PORTFOLIO.holdings.find(h => 
+              input.toLowerCase().includes(h.symbol.toLowerCase())
+            );
+            if (mentionedHolding) {
+              setSelectedHolding(mentionedHolding);
+            }
           }, 2000);
-        } else {
-          try {
-            const parsed = await apiService.parseOrder(input);
-            
-            const updates = {};
-            if (parsed.security) updates.security = parsed.security;
-            if (parsed.quantity) updates.quantity = parsed.quantity.toString();
-            if (parsed.time_in_force) updates.timeInForce = parsed.time_in_force;
-            if (parsed.price) updates.price = parsed.price.toString();
-            if (parsed.contact_method) updates.contactMethod = parsed.contact_method;
-            
-            setOrderForm(prev => ({ ...prev, ...updates }));
-
-            response = '✓ Order parsed:\n';
-            if (parsed.security) {
-              response += `\n• Security: ${parsed.security.name} (${parsed.security.symbol})`;
-            }
-            if (parsed.quantity) {
-              response += `\n• Quantity: ${parsed.quantity} shares`;
-            }
-            response += '\n\nTaking you to order entry...';
-            
-            const assistantMessage = {
-              type: 'assistant',
-              message: response,
-              timestamp: new Date().toISOString()
-            };
-            setChatHistory(prev => [...prev, assistantMessage]);
-            
-            setTimeout(() => {
-              setCurrentView('orderEntry');
-            }, 2000);
-          } catch (error) {
-            response = `I can help you place a trade. Which security would you like to trade?\n\nYour current holdings:\n${MOCK_PORTFOLIO.holdings.map(h => `• ${h.symbol} - ${h.quantity} shares`).join('\n')}`;
-            
-            const assistantMessage = {
-              type: 'assistant',
-              message: response,
-              timestamp: new Date().toISOString()
-            };
-            setChatHistory(prev => [...prev, assistantMessage]);
-          }
+        } catch (error) {
+          response = `I can help you place a trade. Which security would you like to trade?\n\nYour current holdings:\n${MOCK_PORTFOLIO.holdings.map(h => `• ${h.symbol} - ${h.quantity} shares`).join('\n')}`;
+          
+          const assistantMessage = {
+            type: 'assistant',
+            message: response,
+            timestamp: new Date().toISOString()
+          };
+          setChatHistory(prev => [...prev, assistantMessage]);
         }
       } else if (intent === 'portfolio_summary') {
         response = generatePortfolioSummary();
