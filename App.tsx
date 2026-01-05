@@ -1,10 +1,59 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Send, CheckCircle, AlertCircle, Clock, X, Loader2, Info, Code, FileText } from 'lucide-react';
+import { Search, Send, CheckCircle, AlertCircle, Clock, X, Loader2, Info, Code, FileText, TrendingUp, TrendingDown, DollarSign, PieChart, ArrowRight, Newspaper, BarChart3 } from 'lucide-react';
 
-// Backend API configuration
+// API Configuration
 const API_BASE_URL = 'http://localhost:8000';
 
-// Mock data for demo (will be replaced by API calls)
+// Mock Portfolio Data
+const MOCK_PORTFOLIO = {
+  accounts: [
+    {
+      id: 'ACC001',
+      name: 'Investment Account',
+      type: 'Brokerage',
+      balance: 1250000.00,
+      currency: 'USD',
+      performance: 12.5
+    },
+    {
+      id: 'ACC002',
+      name: 'Retirement Account',
+      type: '401(k)',
+      balance: 850000.00,
+      currency: 'USD',
+      performance: 8.3
+    },
+    {
+      id: 'ACC003',
+      name: 'Trading Account',
+      type: 'Active Trading',
+      balance: 450000.00,
+      currency: 'USD',
+      performance: -2.1
+    }
+  ],
+  holdings: [
+    { symbol: 'AAPL', name: 'Apple Inc.', quantity: 2500, avgPrice: 150.00, currentPrice: 178.50, market: 'NASDAQ', currency: 'USD' },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', quantity: 1200, avgPrice: 320.00, currentPrice: 378.91, market: 'NASDAQ', currency: 'USD' },
+    { symbol: 'GOOGL', name: 'Alphabet Inc.', quantity: 800, avgPrice: 125.00, currentPrice: 140.25, market: 'NASDAQ', currency: 'USD' },
+    { symbol: 'TSLA', name: 'Tesla Inc.', quantity: 500, avgPrice: 200.00, currentPrice: 242.84, market: 'NASDAQ', currency: 'USD' },
+    { symbol: 'NOVN', name: 'Novartis AG', quantity: 3000, avgPrice: 85.00, currentPrice: 95.20, market: 'SIX', currency: 'CHF' },
+    { symbol: 'NESN', name: 'Nestlé S.A.', quantity: 2000, avgPrice: 92.00, currentPrice: 87.45, market: 'SIX', currency: 'CHF' }
+  ],
+  totalValue: 2550000.00,
+  todayChange: 15420.00,
+  todayChangePercent: 0.61
+};
+
+// Mock News Data
+const MOCK_NEWS = [
+  { id: 1, symbol: 'AAPL', title: 'Apple announces new AI features for iPhone', sentiment: 'positive', time: '2h ago' },
+  { id: 2, symbol: 'MSFT', title: 'Microsoft Cloud revenue exceeds expectations', sentiment: 'positive', time: '4h ago' },
+  { id: 3, symbol: 'TSLA', title: 'Tesla delivery numbers beat analyst estimates', sentiment: 'positive', time: '1d ago' },
+  { id: 4, symbol: 'GOOGL', title: 'Alphabet faces regulatory challenges in EU', sentiment: 'negative', time: '1d ago' }
+];
+
+// Securities Database (for OMS)
 const SECURITIES = [
   { symbol: 'AAPL', market: 'NASDAQ', currency: 'USD', name: 'Apple Inc.', price: 178.50 },
   { symbol: 'GOOGL', market: 'NASDAQ', currency: 'USD', name: 'Alphabet Inc.', price: 140.25 },
@@ -67,7 +116,6 @@ const apiService = {
       return await response.json();
     } catch (error) {
       console.error('API Error:', error);
-      // Fallback to local parsing if backend unavailable
       return this.parseOrderLocal(text);
     }
   },
@@ -103,7 +151,6 @@ const apiService = {
     }
   },
 
-  // Fallback local implementations
   parseOrderLocal(text) {
     const inputLower = text.toLowerCase();
     const parsed = { security: null, quantity: '', timeInForce: 'DAY' };
@@ -131,7 +178,7 @@ const apiService = {
       return {
         structured: 'VWAP Market Close [16:00]',
         backend_format: 'VWAP|END=16:00|AUCTIONS=false|START=09:30',
-        description: 'Execute order throughout the day to match the volume-weighted average price, minimizing market impact on large orders.',
+        description: 'Execute order throughout the day to match the volume-weighted average price.',
         algo: 'vwap',
         parameters: { end_time: '16:00' },
         confidence: 0.9
@@ -142,7 +189,7 @@ const apiService = {
       return {
         structured: 'TWAP execution over trading day',
         backend_format: 'TWAP|DURATION=full day|SLICES=60',
-        description: 'Distribute order evenly over the specified time period to avoid timing bias and minimize market impact.',
+        description: 'Distribute order evenly over the specified time period.',
         algo: 'twap',
         parameters: { duration: 'full day' },
         confidence: 0.9
@@ -152,7 +199,7 @@ const apiService = {
     return {
       structured: `Custom execution: ${text}`,
       backend_format: `CUSTOM|${text}`,
-      description: 'Custom execution strategy without a predefined algorithm.',
+      description: 'Custom execution strategy.',
       algo: null,
       parameters: {},
       confidence: 0.5
@@ -171,7 +218,24 @@ const apiService = {
   }
 };
 
-export default function UBSOmsInterface() {
+export default function UBSIntegratedApp() {
+  const [currentView, setCurrentView] = useState('portfolio');
+  const [showGeneiChat, setShowGeneiChat] = useState(false);
+  const [geneiInput, setGeneiInput] = useState('');
+  const [chatHistory, setChatHistory] = useState([
+    {
+      type: 'assistant',
+      message: 'Hello! I\'m XAi, your AI-powered wealth management assistant. I can help you with:\n\n📊 Portfolio insights and summaries\n📰 Market news for your holdings\n💼 Placing trades\n📈 Investment analysis\n\nWhat would you like to do today?',
+      timestamp: new Date().toISOString()
+    }
+  ]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('checking');
+  const [selectedHolding, setSelectedHolding] = useState(null);
+  const [showNews, setShowNews] = useState(false);
+  const [newsFilter, setNewsFilter] = useState(null);
+
+  // OMS State
   const [orderForm, setOrderForm] = useState({
     security: null,
     contactMethod: 'phone',
@@ -181,68 +245,44 @@ export default function UBSOmsInterface() {
     gtdDate: '',
     traderText: ''
   });
-
   const [searchTerm, setSearchTerm] = useState('');
   const [showSecurityDropdown, setShowSecurityDropdown] = useState(false);
   const [filteredSecurities, setFilteredSecurities] = useState([]);
-
   const [traderTextSuggestion, setTraderTextSuggestion] = useState('');
   const [isTraderTextLoading, setIsTraderTextLoading] = useState(false);
   const [structuredTraderText, setStructuredTraderText] = useState('');
   const [backendFormat, setBackendFormat] = useState('');
   const [traderTextDescription, setTraderTextDescription] = useState('');
   const [detectedAlgo, setDetectedAlgo] = useState(null);
-  const [showTraderTextTooltip, setShowTraderTextTooltip] = useState(false);
-  const debounceTimer = useRef(null);
-  const traderTextRef = useRef(null);
-
-  const [showGeneiChat, setShowGeneiChat] = useState(false);
-  const [geneiInput, setGeneiInput] = useState('');
-  const [chatHistory, setChatHistory] = useState([
-    {
-      type: 'assistant',
-      message: 'Hello! I\'m Genei, your AI assistant powered by real backend AI services. You can describe your order in plain English, and I\'ll use our Pydantic models to fill out the form accurately.',
-      timestamp: new Date().toISOString()
-    }
-  ]);
-
   const [workflowStage, setWorkflowStage] = useState('entry');
   const [validationStatus, setValidationStatus] = useState(null);
   const [aiSuggestion, setAiSuggestion] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [selectedAlgo, setSelectedAlgo] = useState(null);
-  const [backendStatus, setBackendStatus] = useState('checking');
 
   const chatEndRef = useRef(null);
+  const debounceTimer = useRef(null);
+  const traderTextRef = useRef(null);
 
-  // Check backend status on mount
+  // Check backend on mount
   useEffect(() => {
     const checkBackend = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/`);
         if (response.ok) {
           setBackendStatus('connected');
-          const statusMsg = {
-            type: 'system',
-            message: '✓ Backend API connected successfully',
-            timestamp: new Date().toISOString()
-          };
-          setChatHistory(prev => [...prev, statusMsg]);
         } else {
           setBackendStatus('disconnected');
         }
       } catch (error) {
         setBackendStatus('disconnected');
-        const errorMsg = {
-          type: 'system',
-          message: '⚠ Running in demo mode (backend not available)',
-          timestamp: new Date().toISOString()
-        };
-        setChatHistory(prev => [...prev, errorMsg]);
       }
     };
     checkBackend();
   }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory]);
 
   // Security search
   useEffect(() => {
@@ -259,7 +299,7 @@ export default function UBSOmsInterface() {
     }
   }, [searchTerm]);
 
-  // Trader Text autocomplete with backend
+  // Trader Text autocomplete
   useEffect(() => {
     if (orderForm.traderText.trim().length < 2) {
       setTraderTextSuggestion('');
@@ -278,7 +318,6 @@ export default function UBSOmsInterface() {
 
     debounceTimer.current = setTimeout(async () => {
       try {
-        // Get inline suggestion
         const suggestion = await apiService.getAutocompleteSuggestions(orderForm.traderText);
         if (suggestion && suggestion.toLowerCase().startsWith(orderForm.traderText.toLowerCase())) {
           setTraderTextSuggestion(suggestion);
@@ -286,7 +325,6 @@ export default function UBSOmsInterface() {
           setTraderTextSuggestion('');
         }
 
-        // Parse with backend (LangGraph simulation)
         const result = await apiService.parseTraderText(orderForm.traderText);
         setStructuredTraderText(result.structured);
         setBackendFormat(result.backend_format || result.structured);
@@ -295,11 +333,6 @@ export default function UBSOmsInterface() {
         
       } catch (error) {
         console.error('Error processing trader text:', error);
-        setTraderTextSuggestion('');
-        setStructuredTraderText('');
-        setBackendFormat('');
-        setTraderTextDescription('');
-        setDetectedAlgo(null);
       } finally {
         setIsTraderTextLoading(false);
       }
@@ -312,32 +345,83 @@ export default function UBSOmsInterface() {
     };
   }, [orderForm.traderText]);
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatHistory]);
-
-  const handleSecuritySelect = (security) => {
-    setOrderForm({ ...orderForm, security });
-    setSearchTerm('');
-    setShowSecurityDropdown(false);
+  const calculateGainLoss = (holding) => {
+    const totalCost = holding.quantity * holding.avgPrice;
+    const currentValue = holding.quantity * holding.currentPrice;
+    const gainLoss = currentValue - totalCost;
+    const gainLossPercent = ((currentValue - totalCost) / totalCost) * 100;
+    return { gainLoss, gainLossPercent, currentValue };
   };
 
-  const handleTraderTextKeyDown = (e) => {
-    if (e.key === 'Tab' && traderTextSuggestion && traderTextSuggestion !== orderForm.traderText) {
-      e.preventDefault();
-      setOrderForm({ ...orderForm, traderText: traderTextSuggestion });
-      setTraderTextSuggestion('');
-    } else if (e.key === 'Escape') {
-      setTraderTextSuggestion('');
+  const detectIntent = (text) => {
+    const lowerText = text.toLowerCase();
+    
+    if (lowerText.match(/\b(buy|sell|trade|order|purchase|execute)\b/)) {
+      return 'trade';
     }
+    
+    if (lowerText.match(/\b(portfolio|holdings|positions|summary|overview|balance|performance)\b/)) {
+      return 'portfolio_summary';
+    }
+    
+    if (lowerText.match(/\b(news|updates|latest|headlines|market)\b/)) {
+      return 'news';
+    }
+    
+    if (lowerText.match(/\b(analyze|analysis|recommend|should i|advice|opinion)\b/)) {
+      return 'analysis';
+    }
+    
+    return 'general';
   };
 
-  const getTraderTextGhost = () => {
-    if (!traderTextSuggestion || traderTextSuggestion === orderForm.traderText) return '';
-    if (traderTextSuggestion.toLowerCase().startsWith(orderForm.traderText.toLowerCase())) {
-      return traderTextSuggestion.slice(orderForm.traderText.length);
+  const generatePortfolioSummary = () => {
+    const totalGainLoss = MOCK_PORTFOLIO.holdings.reduce((sum, holding) => {
+      const { gainLoss } = calculateGainLoss(holding);
+      return sum + gainLoss;
+    }, 0);
+    
+    const totalGainLossPercent = (totalGainLoss / (MOCK_PORTFOLIO.totalValue - totalGainLoss)) * 100;
+    
+    const topPerformer = MOCK_PORTFOLIO.holdings.reduce((best, holding) => {
+      const { gainLossPercent } = calculateGainLoss(holding);
+      const bestPercent = best ? calculateGainLoss(best).gainLossPercent : -Infinity;
+      return gainLossPercent > bestPercent ? holding : best;
+    }, null);
+    
+    const topPerformerStats = topPerformer ? calculateGainLoss(topPerformer) : null;
+    
+    return `📊 Portfolio Summary:
+
+💰 Total Value: $${MOCK_PORTFOLIO.totalValue.toLocaleString()}
+${totalGainLoss >= 0 ? '📈' : '📉'} Total Gain/Loss: $${Math.abs(totalGainLoss).toLocaleString()} (${totalGainLossPercent.toFixed(2)}%)
+📅 Today's Change: $${MOCK_PORTFOLIO.todayChange.toLocaleString()} (${MOCK_PORTFOLIO.todayChangePercent >= 0 ? '+' : ''}${MOCK_PORTFOLIO.todayChangePercent.toFixed(2)}%)
+
+🎯 Top Performer: ${topPerformer?.symbol} - ${topPerformer?.name}
+   Gain: $${topPerformerStats?.gainLoss.toLocaleString()} (${topPerformerStats?.gainLossPercent.toFixed(2)}%)
+
+📁 Holdings: ${MOCK_PORTFOLIO.holdings.length} securities
+💼 Accounts: ${MOCK_PORTFOLIO.accounts.length} accounts
+
+Would you like me to show more details about any specific holding or account?`;
+  };
+
+  const generateNewsResponse = (symbol = null) => {
+    const relevantNews = symbol 
+      ? MOCK_NEWS.filter(n => n.symbol === symbol)
+      : MOCK_NEWS;
+    
+    if (relevantNews.length === 0) {
+      return `No recent news found${symbol ? ` for ${symbol}` : ''}.`;
     }
-    return '';
+    
+    let response = `📰 Recent Market News${symbol ? ` for ${symbol}` : ''}:\n\n`;
+    relevantNews.forEach(news => {
+      const emoji = news.sentiment === 'positive' ? '✅' : news.sentiment === 'negative' ? '⚠️' : 'ℹ️';
+      response += `${emoji} ${news.symbol}: ${news.title}\n   (${news.time})\n\n`;
+    });
+    
+    return response + 'Would you like to take any action based on this news?';
   };
 
   const handleGeneiSubmit = async () => {
@@ -352,59 +436,174 @@ export default function UBSOmsInterface() {
 
     const input = geneiInput;
     setGeneiInput('');
+    setIsProcessing(true);
+
+    const intent = detectIntent(input);
     
-    const processingMsg = {
-      type: 'system',
-      message: 'Processing with backend AI service...',
-      timestamp: new Date().toISOString()
-    };
-    setChatHistory(prev => [...prev, processingMsg]);
-
-    try {
-      // Call backend API
-      const parsed = await apiService.parseOrder(input);
+    setTimeout(async () => {
+      let response = '';
       
-      // Update form with Pydantic model response
-      const updates = {};
-      if (parsed.security) updates.security = parsed.security;
-      if (parsed.quantity) updates.quantity = parsed.quantity.toString();
-      if (parsed.time_in_force) updates.timeInForce = parsed.time_in_force;
-      if (parsed.price) updates.price = parsed.price.toString();
-      if (parsed.contact_method) updates.contactMethod = parsed.contact_method;
-      
-      setOrderForm(prev => ({ ...prev, ...updates }));
+      if (intent === 'trade') {
+        const mentionedHolding = MOCK_PORTFOLIO.holdings.find(h => 
+          input.toLowerCase().includes(h.symbol.toLowerCase()) || 
+          input.toLowerCase().includes(h.name.toLowerCase())
+        );
+        
+        if (mentionedHolding) {
+          response = `I understand you want to trade ${mentionedHolding.symbol}. Let me take you to the order entry page.\n\nCurrent position: ${mentionedHolding.quantity} shares at $${mentionedHolding.currentPrice}\nUnrealized P&L: $${calculateGainLoss(mentionedHolding).gainLoss.toFixed(2)}`;
+          
+          const assistantMessage = {
+            type: 'assistant',
+            message: response,
+            timestamp: new Date().toISOString(),
+            hasAction: true,
+            actionType: 'navigate_to_trade',
+            actionData: { symbol: mentionedHolding.symbol }
+          };
+          setChatHistory(prev => [...prev, assistantMessage]);
+          
+          setTimeout(() => {
+            setCurrentView('orderEntry');
+            const security = SECURITIES.find(s => s.symbol === mentionedHolding.symbol);
+            setOrderForm(prev => ({ ...prev, security }));
+            setSelectedHolding(mentionedHolding);
+          }, 2000);
+        } else {
+          try {
+            const parsed = await apiService.parseOrder(input);
+            
+            const updates = {};
+            if (parsed.security) updates.security = parsed.security;
+            if (parsed.quantity) updates.quantity = parsed.quantity.toString();
+            if (parsed.time_in_force) updates.timeInForce = parsed.time_in_force;
+            if (parsed.price) updates.price = parsed.price.toString();
+            if (parsed.contact_method) updates.contactMethod = parsed.contact_method;
+            
+            setOrderForm(prev => ({ ...prev, ...updates }));
 
-      let response = '✓ Order parsed using Pydantic model:\n';
-      if (parsed.security) {
-        response += `\n• Security: ${parsed.security.name} (${parsed.security.symbol})`;
+            response = '✓ Order parsed:\n';
+            if (parsed.security) {
+              response += `\n• Security: ${parsed.security.name} (${parsed.security.symbol})`;
+            }
+            if (parsed.quantity) {
+              response += `\n• Quantity: ${parsed.quantity} shares`;
+            }
+            response += '\n\nTaking you to order entry...';
+            
+            const assistantMessage = {
+              type: 'assistant',
+              message: response,
+              timestamp: new Date().toISOString()
+            };
+            setChatHistory(prev => [...prev, assistantMessage]);
+            
+            setTimeout(() => {
+              setCurrentView('orderEntry');
+            }, 2000);
+          } catch (error) {
+            response = `I can help you place a trade. Which security would you like to trade?\n\nYour current holdings:\n${MOCK_PORTFOLIO.holdings.map(h => `• ${h.symbol} - ${h.quantity} shares`).join('\n')}`;
+            
+            const assistantMessage = {
+              type: 'assistant',
+              message: response,
+              timestamp: new Date().toISOString()
+            };
+            setChatHistory(prev => [...prev, assistantMessage]);
+          }
+        }
+      } else if (intent === 'portfolio_summary') {
+        response = generatePortfolioSummary();
+        
+        const assistantMessage = {
+          type: 'assistant',
+          message: response,
+          timestamp: new Date().toISOString()
+        };
+        setChatHistory(prev => [...prev, assistantMessage]);
+      } else if (intent === 'news') {
+        const mentionedSymbol = MOCK_PORTFOLIO.holdings.find(h => 
+          input.toLowerCase().includes(h.symbol.toLowerCase())
+        )?.symbol;
+        
+        response = generateNewsResponse(mentionedSymbol);
+        
+        const assistantMessage = {
+          type: 'assistant',
+          message: response,
+          timestamp: new Date().toISOString()
+        };
+        setChatHistory(prev => [...prev, assistantMessage]);
+        
+        if (mentionedSymbol) {
+          setNewsFilter(mentionedSymbol);
+          setShowNews(true);
+        }
+      } else if (intent === 'analysis') {
+        response = `📊 Based on your portfolio analysis:\n\n✅ Strengths:\n• Diversified across tech and healthcare sectors\n• Strong performers: AAPL, MSFT showing positive gains\n• Good exposure to both US and Swiss markets\n\n⚠️ Areas to consider:\n• NESN showing negative performance (-5.0%)\n• Heavy concentration in tech sector (60%)\n\n💡 Suggestions:\n• Consider rebalancing to reduce tech concentration\n• May want to review NESN position\n• Portfolio is well-positioned for growth\n\nWould you like to make any trades based on this analysis?`;
+        
+        const assistantMessage = {
+          type: 'assistant',
+          message: response,
+          timestamp: new Date().toISOString()
+        };
+        setChatHistory(prev => [...prev, assistantMessage]);
+      } else {
+        response = `I can help you with:\n\n📊 Portfolio Summary - "Show my portfolio"\n📰 Market News - "Latest news on AAPL"\n💼 Trading - "Buy 100 shares of MSFT"\n📈 Analysis - "Analyze my holdings"\n\nWhat would you like to do?`;
+        
+        const assistantMessage = {
+          type: 'assistant',
+          message: response,
+          timestamp: new Date().toISOString()
+        };
+        setChatHistory(prev => [...prev, assistantMessage]);
       }
-      if (parsed.quantity) {
-        response += `\n• Quantity: ${parsed.quantity} shares`;
-      }
-      if (parsed.price) {
-        response += `\n• Price: $${parsed.price}`;
-      }
-      response += `\n• Time in Force: ${parsed.time_in_force || 'DAY'}`;
-      response += `\n• Contact: ${parsed.contact_method || 'phone'}`;
       
-      if (!parsed.security || !parsed.quantity) {
-        response += '\n\n⚠ Some fields couldn\'t be extracted. Please review and complete.';
-      }
+      setIsProcessing(false);
+    }, 800);
+  };
 
+  const handleQuickAction = (action, data) => {
+    if (action === 'trade') {
+      setCurrentView('orderEntry');
+      const security = SECURITIES.find(s => s.symbol === data.symbol);
+      setOrderForm(prev => ({ ...prev, security }));
+      setSelectedHolding(data);
+    } else if (action === 'news') {
+      setNewsFilter(data.symbol);
+      setShowNews(true);
+    } else if (action === 'summary') {
+      const summary = generatePortfolioSummary();
       const assistantMessage = {
         type: 'assistant',
-        message: response,
+        message: summary,
         timestamp: new Date().toISOString()
       };
       setChatHistory(prev => [...prev, assistantMessage]);
-    } catch (error) {
-      const errorMessage = {
-        type: 'assistant',
-        message: '❌ Error parsing order. Please try again or fill the form manually.',
-        timestamp: new Date().toISOString()
-      };
-      setChatHistory(prev => [...prev, errorMessage]);
+      setShowGeneiChat(true);
     }
+  };
+
+  // OMS Functions
+  const handleSecuritySelect = (security) => {
+    setOrderForm({ ...orderForm, security });
+    setSearchTerm('');
+    setShowSecurityDropdown(false);
+  };
+
+  const handleTraderTextKeyDown = (e) => {
+    if (e.key === 'Tab' && traderTextSuggestion && traderTextSuggestion !== orderForm.traderText) {
+      e.preventDefault();
+      setOrderForm({ ...orderForm, traderText: traderTextSuggestion });
+      setTraderTextSuggestion('');
+    }
+  };
+
+  const getTraderTextGhost = () => {
+    if (!traderTextSuggestion || traderTextSuggestion === orderForm.traderText) return '';
+    if (traderTextSuggestion.toLowerCase().startsWith(orderForm.traderText.toLowerCase())) {
+      return traderTextSuggestion.slice(orderForm.traderText.length);
+    }
+    return '';
   };
 
   const validateOrder = () => {
@@ -413,41 +612,21 @@ export default function UBSOmsInterface() {
     setAiSuggestion(null);
     setWorkflowStage('validation');
 
-    const validationMessage = {
-      type: 'system',
-      message: 'Order validation initiated...',
-      timestamp: new Date().toISOString()
-    };
-    setChatHistory(prev => [...prev, validationMessage]);
-
     setTimeout(() => {
       if (!orderForm.security) {
         setValidationStatus({ type: 'error', message: 'Please select a security' });
-        const errorMessage = {
-          type: 'assistant',
-          message: '❌ Validation failed: Please select a security before validating the order.',
-          timestamp: new Date().toISOString()
-        };
-        setChatHistory(prev => [...prev, errorMessage]);
         setIsProcessing(false);
         return;
       }
 
       if (!orderForm.quantity || parseInt(orderForm.quantity) <= 0) {
         setValidationStatus({ type: 'error', message: 'Please enter a valid quantity' });
-        const errorMessage = {
-          type: 'assistant',
-          message: '❌ Validation failed: Please enter a valid quantity.',
-          timestamp: new Date().toISOString()
-        };
-        setChatHistory(prev => [...prev, errorMessage]);
         setIsProcessing(false);
         return;
       }
 
       const marketStatus = MARKET_STATUS[orderForm.security.market];
       
-      // Use Case 2: DAY order after market close (HITL for GTD conversion)
       if (orderForm.timeInForce === 'DAY' && !marketStatus.open) {
         setValidationStatus({ 
           type: 'warning', 
@@ -458,29 +637,12 @@ export default function UBSOmsInterface() {
           action: 'convert_to_gtd',
           nextDate: marketStatus.nextOpen
         });
-        
-        const suggestionMessage = {
-          type: 'assistant',
-          message: `⚠️ The ${orderForm.security.market} market is currently closed. DAY orders cannot be placed after market hours.\n\nI suggest converting this to a GTD (Good Till Date) order for the next trading day: ${marketStatus.nextOpen}\n\nWould you like me to make this change?`,
-          timestamp: new Date().toISOString(),
-          hasAction: true,
-          actionType: 'convert_to_gtd'
-        };
-        setChatHistory(prev => [...prev, suggestionMessage]);
         setIsProcessing(false);
-        setWorkflowStage('validation'); // Stay at validation stage
+        setWorkflowStage('validation');
         return;
       }
 
-      // Use Case 1: Valid order - proceed through workflow
       setValidationStatus({ type: 'success', message: 'Order validated successfully' });
-      
-      const successMessage = {
-        type: 'assistant',
-        message: '✅ Order validated successfully! Proceeding with order submission...',
-        timestamp: new Date().toISOString()
-      };
-      setChatHistory(prev => [...prev, successMessage]);
       
       const stages = ['validation', 'submission', 'market'];
       let currentIndex = 0;
@@ -490,7 +652,6 @@ export default function UBSOmsInterface() {
         if (currentIndex < stages.length) {
           setWorkflowStage(stages[currentIndex]);
           
-          // Use Case 3: HITL at Market Order stage if trader text exists
           if (stages[currentIndex] === 'market' && orderForm.traderText.trim()) {
             clearInterval(progressInterval);
             
@@ -503,15 +664,6 @@ export default function UBSOmsInterface() {
                 message: 'I detected trader instructions but couldn\'t identify a specific algorithm. Please select an algo flow to proceed.',
                 action: 'select_algo'
               });
-              
-              const algoMessage = {
-                type: 'assistant',
-                message: '⚠️ Your order includes trader instructions, but I need you to select an execution algorithm.\n\nBased on your notes, here are my recommendations:',
-                timestamp: new Date().toISOString(),
-                hasAction: true,
-                actionType: 'select_algo'
-              };
-              setChatHistory(prev => [...prev, algoMessage]);
               setIsProcessing(false);
             } else {
               const algo = ALGO_SUGGESTIONS.find(a => a.id === detectedAlgo);
@@ -524,15 +676,6 @@ export default function UBSOmsInterface() {
                 action: 'confirm_algo',
                 algo: detectedAlgo
               });
-              
-              const confirmMessage = {
-                type: 'assistant',
-                message: `📊 Backend parsed your trader text:\n\n🎯 Display: "${structuredTraderText}"\n\n💻 Backend: ${backendFormat}\n\n📝 Strategy: ${traderTextDescription}\n\nI recommend using ${algo?.name} for this order.\n\nWould you like to proceed?`,
-                timestamp: new Date().toISOString(),
-                hasAction: true,
-                actionType: 'confirm_algo'
-              };
-              setChatHistory(prev => [...prev, confirmMessage]);
               setIsProcessing(false);
             }
           }
@@ -558,24 +701,10 @@ export default function UBSOmsInterface() {
           message: 'Order converted to GTD. Please validate again.' 
         });
         setWorkflowStage('entry');
-        
-        const acceptMessage = {
-          type: 'assistant',
-          message: `✓ I've converted your order to GTD with expiry date ${aiSuggestion.nextDate.split(' ')[0]}. Please click "Validate Order" again to proceed.`,
-          timestamp: new Date().toISOString()
-        };
-        setChatHistory(prev => [...prev, acceptMessage]);
       } else {
         setValidationStatus({ type: 'info', message: 'Order cancelled' });
         setAiSuggestion(null);
         setWorkflowStage('entry');
-        
-        const cancelMessage = {
-          type: 'assistant',
-          message: 'Order cancelled. Let me know if you\'d like to create a new order.',
-          timestamp: new Date().toISOString()
-        };
-        setChatHistory(prev => [...prev, cancelMessage]);
       }
     } else if (aiSuggestion?.action === 'confirm_algo') {
       if (accept) {
@@ -583,114 +712,17 @@ export default function UBSOmsInterface() {
         setAiSuggestion(null);
         setValidationStatus({ type: 'success', message: 'Algo confirmed, proceeding to execution' });
         
-        const confirmMessage = {
-          type: 'assistant',
-          message: `✅ ${ALGO_SUGGESTIONS.find(a => a.id === aiSuggestion.algo)?.name} confirmed. Proceeding to execution...`,
-          timestamp: new Date().toISOString()
-        };
-        setChatHistory(prev => [...prev, confirmMessage]);
-        
         setTimeout(() => {
           setWorkflowStage('execution');
           setIsProcessing(false);
-          
-          const executionMessage = {
-            type: 'assistant',
-            message: '🎉 Order executed successfully using the selected algorithm!',
-            timestamp: new Date().toISOString()
-          };
-          setChatHistory(prev => [...prev, executionMessage]);
-          
-          generateFinalSummary();
         }, 1500);
       } else {
         setAiSuggestion({
           message: 'Please select an algorithm from the options below.',
           action: 'select_algo'
         });
-        
-        const selectMessage = {
-          type: 'assistant',
-          message: 'No problem. Please choose an algorithm from the available options.',
-          timestamp: new Date().toISOString()
-        };
-        setChatHistory(prev => [...prev, selectMessage]);
       }
     }
-  };
-
-  const generateFinalSummary = () => {
-    setTimeout(() => {
-      const algo = selectedAlgo ? ALGO_SUGGESTIONS.find(a => a.id === selectedAlgo) : null;
-      const executionTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const estimatedValue = orderForm.security && orderForm.quantity 
-        ? (parseFloat(orderForm.quantity) * orderForm.security.price).toFixed(2) 
-        : 'N/A';
-      
-      const summaryMessage = {
-        type: 'summary',
-        message: `
-═══════════════════════════════════
-📋 ORDER EXECUTION SUMMARY
-═══════════════════════════════════
-
-Order ID: OMS-${Date.now().toString().slice(-8)}
-Execution Time: ${executionTime}
-Status: ✅ EXECUTED
-Backend: ${backendStatus === 'connected' ? 'API Connected' : 'Demo Mode'}
-
-─────────────────────────────────
-
-📊 SECURITY DETAILS
-Security: ${orderForm.security?.name || 'N/A'}
-Symbol: ${orderForm.security?.symbol || 'N/A'}
-Market: ${orderForm.security?.market || 'N/A'}
-Currency: ${orderForm.security?.currency || 'N/A'}
-Price: ${orderForm.security?.currency} ${orderForm.security?.price.toFixed(2)}
-
-─────────────────────────────────
-
-📈 ORDER DETAILS
-Quantity: ${orderForm.quantity} shares
-Order Price: ${orderForm.price || 'Market'}
-Time in Force: ${orderForm.timeInForce}${orderForm.timeInForce === 'GTD' && orderForm.gtdDate ? ` (Valid till ${orderForm.gtdDate})` : ''}
-Estimated Value: ${orderForm.security?.currency} ${estimatedValue}
-Contact Method: ${orderForm.contactMethod.charAt(0).toUpperCase() + orderForm.contactMethod.slice(1)}
-
-─────────────────────────────────
-
-${algo ? `🤖 EXECUTION ALGORITHM
-Algorithm: ${algo.name}
-Strategy: ${algo.description}
-
-📝 AI-PARSED TRADER INSTRUCTIONS:
-Display Format: ${structuredTraderText}
-Backend Format: ${backendFormat}
-Description: ${traderTextDescription}
-
-─────────────────────────────────
-` : ''}
-${orderForm.traderText ? `📝 ORIGINAL TRADER NOTES
-${orderForm.traderText}
-
-─────────────────────────────────
-` : ''}
-✓ Order successfully routed to market
-✓ Confirmation sent to client
-✓ Compliance checks passed
-✓ Trade recorded in system
-✓ Pydantic validation completed
-✓ LangGraph workflow executed
-
-═══════════════════════════════════
-
-Thank you for using UBS Order Management System powered by Genei AI with Azure OpenAI & LangGraph.
-        `,
-        timestamp: new Date().toISOString()
-      };
-      
-      setChatHistory(prev => [...prev, summaryMessage]);
-    }, 2000);
   };
 
   const handleAlgoSelection = (algoId) => {
@@ -698,26 +730,9 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
     setAiSuggestion(null);
     setValidationStatus({ type: 'success', message: 'Algo selected, proceeding to execution' });
     
-    const algo = ALGO_SUGGESTIONS.find(a => a.id === algoId);
-    const confirmMessage = {
-      type: 'assistant',
-      message: `✅ You've selected ${algo.name}. Proceeding to execution...`,
-      timestamp: new Date().toISOString()
-    };
-    setChatHistory(prev => [...prev, confirmMessage]);
-    
     setTimeout(() => {
       setWorkflowStage('execution');
       setIsProcessing(false);
-      
-      const executionMessage = {
-        type: 'assistant',
-        message: '🎉 Order executed successfully using the selected algorithm!',
-        timestamp: new Date().toISOString()
-      };
-      setChatHistory(prev => [...prev, executionMessage]);
-      
-      generateFinalSummary();
     }, 1500);
   };
 
@@ -727,6 +742,376 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
 
   const ghostText = getTraderTextGhost();
 
+  // Portfolio View
+  if (currentView === 'portfolio') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        {/* Header */}
+        <div className="bg-white border-b-4 border-red-600 shadow-sm">
+          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="text-red-600 font-bold text-3xl">UBS</div>
+              <div className="h-8 w-px bg-gray-300"></div>
+              <div className="text-gray-700 font-medium">Wealth Management</div>
+              <div className={`ml-3 px-2 py-1 rounded text-xs font-medium ${
+                backendStatus === 'connected' 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-yellow-100 text-yellow-700'
+              }`}>
+                {backendStatus === 'connected' ? '● API Connected' : '● Demo Mode'}
+              </div>
+            </div>
+            <button
+              onClick={() => setShowGeneiChat(!showGeneiChat)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                showGeneiChat
+                  ? 'bg-red-600 text-white shadow-lg'
+                  : 'bg-white text-gray-700 border border-gray-300 hover:border-red-600 hover:text-red-600'
+              }`}
+            >
+              <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold">
+                X
+              </div>
+              <span>Ask XAi</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 flex overflow-hidden">
+          {/* Main Content */}
+          <div className="flex-1 overflow-auto">
+            <div className="max-w-7xl mx-auto px-6 py-8">
+              {/* Portfolio Summary Cards */}
+              <div className="mb-8">
+                <h1 className="text-2xl font-bold text-gray-800 mb-6">Portfolio Overview</h1>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-lg shadow-lg p-6 text-white">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-red-100 text-sm font-medium">Total Portfolio Value</div>
+                      <PieChart className="text-red-200" size={20} />
+                    </div>
+                    <div className="text-3xl font-bold mb-1">
+                      ${MOCK_PORTFOLIO.totalValue.toLocaleString()}
+                    </div>
+                    <div className={`flex items-center gap-1 text-sm ${
+                      MOCK_PORTFOLIO.todayChangePercent >= 0 ? 'text-green-200' : 'text-red-200'
+                    }`}>
+                      {MOCK_PORTFOLIO.todayChangePercent >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                      <span>
+                        {MOCK_PORTFOLIO.todayChangePercent >= 0 ? '+' : ''}
+                        ${Math.abs(MOCK_PORTFOLIO.todayChange).toLocaleString()} ({MOCK_PORTFOLIO.todayChangePercent.toFixed(2)}%)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-gray-600 text-sm font-medium">Holdings</div>
+                      <BarChart3 className="text-gray-400" size={20} />
+                    </div>
+                    <div className="text-3xl font-bold text-gray-800 mb-1">
+                      {MOCK_PORTFOLIO.holdings.length}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      Securities across {new Set(MOCK_PORTFOLIO.holdings.map(h => h.market)).size} markets
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-gray-600 text-sm font-medium">Accounts</div>
+                      <DollarSign className="text-gray-400" size={20} />
+                    </div>
+                    <div className="text-3xl font-bold text-gray-800 mb-1">
+                      {MOCK_PORTFOLIO.accounts.length}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      Active investment accounts
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="bg-white rounded-lg shadow-sm p-4 mb-8">
+                  <div className="text-sm font-semibold text-gray-700 mb-3">Quick Actions</div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => handleQuickAction('summary')}
+                      className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium"
+                    >
+                      📊 Portfolio Summary
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowNews(true);
+                        setNewsFilter(null);
+                      }}
+                      className="px-4 py-2 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors text-sm font-medium"
+                    >
+                      📰 Market News
+                    </button>
+                    <button
+                      onClick={() => setCurrentView('orderEntry')}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+                    >
+                      💼 Place Trade
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Accounts */}
+              <div className="mb-8">
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Accounts</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {MOCK_PORTFOLIO.accounts.map(account => (
+                    <div key={account.id} className="bg-white rounded-lg shadow-sm p-5 border border-gray-200 hover:shadow-md transition-shadow">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <div className="font-semibold text-gray-800">{account.name}</div>
+                          <div className="text-xs text-gray-500">{account.type} • {account.id}</div>
+                        </div>
+                        <div className={`px-2 py-1 rounded text-xs font-medium ${
+                          account.performance >= 0 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {account.performance >= 0 ? '+' : ''}{account.performance}%
+                        </div>
+                      </div>
+                      <div className="text-2xl font-bold text-gray-800">
+                        ${account.balance.toLocaleString()}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">{account.currency}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Holdings */}
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Holdings</h2>
+                <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Symbol</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Price</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Price</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Market Value</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Gain/Loss</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {MOCK_PORTFOLIO.holdings.map(holding => {
+                        const { gainLoss, gainLossPercent, currentValue } = calculateGainLoss(holding);
+                        return (
+                          <tr key={holding.symbol} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div>
+                                <div className="font-semibold text-gray-900">{holding.symbol}</div>
+                                <div className="text-xs text-gray-500">{holding.name}</div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                              {holding.quantity.toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                              ${holding.avgPrice.toFixed(2)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                              ${holding.currentPrice.toFixed(2)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              ${currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className={`text-sm font-medium ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {gainLoss >= 0 ? '+' : ''}${Math.abs(gainLoss).toFixed(2)}
+                                <div className="text-xs">({gainLoss >= 0 ? '+' : ''}{gainLossPercent.toFixed(2)}%)</div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-2">
+                              <button
+                                onClick={() => handleQuickAction('trade', holding)}
+                                className="text-red-600 hover:text-red-700 font-medium"
+                              >
+                                Trade
+                              </button>
+                              <button
+                                onClick={() => handleQuickAction('news', holding)}
+                                className="text-blue-600 hover:text-blue-700 font-medium"
+                              >
+                                News
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* News Modal */}
+              {showNews && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-auto">
+                    <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                      <h3 className="text-xl font-bold text-gray-800">
+                        Market News {newsFilter && `- ${newsFilter}`}
+                      </h3>
+                      <button
+                        onClick={() => {
+                          setShowNews(false);
+                          setNewsFilter(null);
+                        }}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <X size={24} />
+                      </button>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      {(newsFilter ? MOCK_NEWS.filter(n => n.symbol === newsFilter) : MOCK_NEWS).map(news => (
+                        <div key={news.id} className="p-4 border border-gray-200 rounded-lg hover:border-red-300 transition-colors">
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-1 bg-gray-100 rounded text-xs font-medium text-gray-700">
+                                {news.symbol}
+                              </span>
+                              <span className={`text-xs ${
+                                news.sentiment === 'positive' ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {news.sentiment === 'positive' ? '✅' : '⚠️'} {news.sentiment}
+                              </span>
+                            </div>
+                            <span className="text-xs text-gray-500">{news.time}</span>
+                          </div>
+                          <div className="font-medium text-gray-800">{news.title}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* XAi Chat Sidebar */}
+          {showGeneiChat && (
+            <div className="w-96 bg-white border-l border-gray-200 flex flex-col shadow-2xl">
+              <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-red-600 to-red-700">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-red-600 font-bold shadow-md">
+                      X
+                    </div>
+                    <div>
+                      <div className="font-semibold text-white">XAi</div>
+                      <div className="text-xs text-red-100">Portfolio Assistant</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowGeneiChat(false)}
+                    className="text-white hover:bg-red-800 rounded-lg p-1 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {chatHistory.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {msg.type === 'assistant' && (
+                      <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 mr-2 mt-1">
+                        X
+                      </div>
+                    )}
+                    <div className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                      msg.type === 'user'
+                        ? 'bg-red-600 text-white'
+                        : msg.type === 'system'
+                        ? 'bg-gray-100 text-gray-600 italic text-sm'
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      <div className="whitespace-pre-wrap text-sm">{msg.message}</div>
+                      
+                      {msg.hasAction && msg.actionType === 'navigate_to_trade' && (
+                        <button
+                          onClick={() => {
+                            setCurrentView('orderEntry');
+                            const security = SECURITIES.find(s => s.symbol === msg.actionData.symbol);
+                            setOrderForm(prev => ({ ...prev, security }));
+                          }}
+                          className="mt-3 w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                        >
+                          Go to Order Entry <ArrowRight size={16} />
+                        </button>
+                      )}
+                      
+                      <div className={`text-xs mt-1 ${
+                        msg.type === 'user' ? 'text-red-100' : 'text-gray-500'
+                      }`}>
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+
+              <div className="p-4 border-t border-gray-200 bg-gray-50">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={geneiInput}
+                    onChange={(e) => setGeneiInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && !isProcessing && handleGeneiSubmit()}
+                    placeholder="Ask about your portfolio..."
+                    disabled={isProcessing}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-sm disabled:bg-gray-100"
+                  />
+                  <button
+                    onClick={handleGeneiSubmit}
+                    disabled={!geneiInput.trim() || isProcessing}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors"
+                  >
+                    {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setGeneiInput('Show my portfolio summary')}
+                    className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
+                  >
+                    📊 Portfolio
+                  </button>
+                  <button
+                    onClick={() => setGeneiInput('Latest news on my holdings')}
+                    className="text-xs px-2 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors"
+                  >
+                    📰 News
+                  </button>
+                  <button
+                    onClick={() => setGeneiInput('Buy AAPL')}
+                    className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors"
+                  >
+                    💼 Trade
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // OMS View (Order Entry)
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
@@ -736,15 +1121,12 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
             <div className="text-red-600 font-bold text-3xl">UBS</div>
             <div className="h-8 w-px bg-gray-300"></div>
             <div className="text-gray-700 font-medium">Order Management System</div>
-            <div className={`ml-3 px-2 py-1 rounded text-xs font-medium ${
-              backendStatus === 'connected' 
-                ? 'bg-green-100 text-green-700' 
-                : backendStatus === 'disconnected'
-                ? 'bg-yellow-100 text-yellow-700'
-                : 'bg-gray-100 text-gray-600'
-            }`}>
-              {backendStatus === 'connected' ? '● API Connected' : backendStatus === 'disconnected' ? '● Demo Mode' : '● Checking...'}
-            </div>
+            <button
+              onClick={() => setCurrentView('portfolio')}
+              className="ml-4 px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              ← Back to Portfolio
+            </button>
           </div>
           <button
             onClick={() => setShowGeneiChat(!showGeneiChat)}
@@ -755,9 +1137,9 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
             }`}
           >
             <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold">
-              G
+              X
             </div>
-            <span>Ask Genei</span>
+            <span>Ask XAi</span>
           </button>
         </div>
       </div>
@@ -813,6 +1195,17 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
               <div className="lg:col-span-2 space-y-6">
                 <div className="bg-white rounded-lg shadow-sm p-6">
                   <h2 className="text-lg font-semibold text-gray-800 mb-4">Order Entry</h2>
+                  
+                  {selectedHolding && (
+                    <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="font-semibold text-blue-900 mb-2">Pre-filled from portfolio:</div>
+                      <div className="text-sm text-blue-800">
+                        Security: {selectedHolding.symbol} - {selectedHolding.name}<br/>
+                        Current Position: {selectedHolding.quantity} shares<br/>
+                        Current Price: ${selectedHolding.currentPrice}
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="mb-4 relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -947,7 +1340,7 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                   <div className="mb-4">
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-sm font-medium text-gray-700">
-                        Trader Notes (Backend AI Parsing)
+                        Trader Notes (AI Parsing)
                       </label>
                       {isTraderTextLoading && (
                         <Loader2 className="w-4 h-4 text-red-600 animate-spin" />
@@ -983,7 +1376,7 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                       </span>
                       {structuredTraderText && (
                         <span className="text-green-600 font-medium">
-                          ✓ Backend: {structuredTraderText}
+                          ✓ {structuredTraderText}
                         </span>
                       )}
                     </div>
@@ -1042,10 +1435,10 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                   <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-orange-500">
                     <div className="flex items-start gap-3 mb-4">
                       <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
-                        G
+                        X
                       </div>
                       <div>
-                        <div className="font-semibold text-gray-800 mb-1">Genei Suggestion</div>
+                        <div className="font-semibold text-gray-800 mb-1">XAi Suggestion</div>
                         <div className="text-sm text-gray-700">{aiSuggestion.message}</div>
                       </div>
                     </div>
@@ -1070,13 +1463,12 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                   <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-orange-500">
                     <div className="flex items-start gap-3 mb-4">
                       <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
-                        G
+                        X
                       </div>
                       <div className="flex-1">
                         <div className="font-semibold text-gray-800 mb-1">Algo Detected</div>
                         <div className="text-sm text-gray-700 mb-3">{aiSuggestion.message}</div>
                         
-                        {/* Display all three formats */}
                         <div className="space-y-2 mb-3">
                           <div className="p-2 bg-green-50 rounded border border-green-200">
                             <div className="text-xs font-semibold text-green-800 mb-1 flex items-center gap-1">
@@ -1125,7 +1517,7 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                   <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-orange-500">
                     <div className="flex items-start gap-3 mb-4">
                       <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
-                        G
+                        X
                       </div>
                       <div>
                         <div className="font-semibold text-gray-800 mb-1">Select Execution Algorithm</div>
@@ -1195,12 +1587,12 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                 </div>
 
                 <div className="bg-gray-100 rounded-lg p-4 text-xs text-gray-600">
-                  <div className="font-semibold text-gray-800 mb-2">💡 Backend Features:</div>
+                  <div className="font-semibold text-gray-800 mb-2">💡 Features:</div>
                   <div className="space-y-2">
-                    <div>• Pydantic models for type-safe order parsing</div>
-                    <div>• FastAPI backend with LangGraph simulation</div>
-                    <div>• Real-time trader text parsing with structured output</div>
-                    <div>• IDE-style autocomplete suggestions</div>
+                    <div>• AI-powered trader text parsing</div>
+                    <div>• Real-time autocomplete suggestions</div>
+                    <div>• Human-in-the-loop validation</div>
+                    <div>• Algorithm detection & routing</div>
                   </div>
                 </div>
               </div>
@@ -1208,17 +1600,18 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
           </div>
         </div>
 
+        {/* XAi Chat Sidebar for OMS */}
         {showGeneiChat && (
           <div className="w-96 bg-white border-l border-gray-200 flex flex-col shadow-2xl">
             <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-red-600 to-red-700">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-red-600 font-bold shadow-md">
-                    G
+                    X
                   </div>
                   <div>
-                    <div className="font-semibold text-white">Genei</div>
-                    <div className="text-xs text-red-100">AI Assistant with FastAPI</div>
+                    <div className="font-semibold text-white">XAi</div>
+                    <div className="text-xs text-red-100">AI Assistant</div>
                   </div>
                 </div>
                 <button
@@ -1233,9 +1626,9 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {chatHistory.map((msg, idx) => (
                 <div key={idx} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  {(msg.type === 'assistant' || msg.type === 'summary') && (
+                  {(msg.type === 'assistant' || msg.type === 'system') && (
                     <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 mr-2 mt-1">
-                      G
+                      X
                     </div>
                   )}
                   <div className={`max-w-[80%] rounded-lg px-4 py-2 ${
@@ -1243,79 +1636,11 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                       ? 'bg-red-600 text-white'
                       : msg.type === 'system'
                       ? 'bg-gray-100 text-gray-600 italic text-sm'
-                      : msg.type === 'summary'
-                      ? 'bg-gradient-to-br from-green-50 to-blue-50 text-gray-800 border-2 border-green-300'
                       : 'bg-gray-100 text-gray-800'
                   }`}>
-                    <div className={`text-sm ${msg.type === 'summary' ? 'font-mono whitespace-pre text-xs' : 'whitespace-pre-wrap'}`}>
-                      {msg.message}
-                    </div>
-                    
-                    {/* Action Buttons in Chat */}
-                    {msg.hasAction && msg.actionType === 'convert_to_gtd' && aiSuggestion?.action === 'convert_to_gtd' && (
-                      <div className="flex gap-2 mt-3">
-                        <button
-                          onClick={() => handleAiSuggestion(true)}
-                          className="flex-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs font-medium"
-                        >
-                          ✓ Accept GTD
-                        </button>
-                        <button
-                          onClick={() => handleAiSuggestion(false)}
-                          className="flex-1 px-3 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-xs font-medium"
-                        >
-                          ✗ Cancel
-                        </button>
-                      </div>
-                    )}
-                    
-                    {msg.hasAction && msg.actionType === 'confirm_algo' && aiSuggestion?.action === 'confirm_algo' && (
-                      <div className="mt-3">
-                        {/* Show parsed formats */}
-                        <div className="mb-3 p-2 bg-white rounded border border-gray-200 space-y-1">
-                          <div className="text-xs">
-                            <span className="font-semibold text-green-700">Display:</span>
-                            <span className="ml-1 text-gray-700">{structuredTraderText}</span>
-                          </div>
-                          <div className="text-xs">
-                            <span className="font-semibold text-blue-700">Backend:</span>
-                            <span className="ml-1 text-gray-700 font-mono text-[10px]">{backendFormat}</span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleAiSuggestion(true)}
-                            className="flex-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs font-medium"
-                          >
-                            ✓ Confirm {ALGO_SUGGESTIONS.find(a => a.id === aiSuggestion.algo)?.name}
-                          </button>
-                          <button
-                            onClick={() => handleAiSuggestion(false)}
-                            className="flex-1 px-3 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-xs font-medium"
-                          >
-                            Choose Different
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {msg.hasAction && msg.actionType === 'select_algo' && aiSuggestion?.action === 'select_algo' && (
-                      <div className="space-y-2 mt-3">
-                        {ALGO_SUGGESTIONS.map((algo) => (
-                          <button
-                            key={algo.id}
-                            onClick={() => handleAlgoSelection(algo.id)}
-                            className="w-full text-left p-2 bg-white hover:bg-red-50 border border-gray-300 hover:border-red-400 rounded-lg transition-colors"
-                          >
-                            <div className="font-semibold text-gray-800 text-xs">{algo.name}</div>
-                            <div className="text-xs text-gray-600 mt-0.5">{algo.useCase}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    
+                    <div className="whitespace-pre-wrap text-sm">{msg.message}</div>
                     <div className={`text-xs mt-1 ${
-                      msg.type === 'user' ? 'text-red-100' : msg.type === 'summary' ? 'text-green-700' : 'text-gray-500'
+                      msg.type === 'user' ? 'text-red-100' : 'text-gray-500'
                     }`}>
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
@@ -1344,7 +1669,7 @@ Thank you for using UBS Order Management System powered by Genei AI with Azure O
                 </button>
               </div>
               <div className="text-xs text-gray-500 mt-2">
-                Try: "Buy 100 shares of AAPL at $180 as a GTC order via email"
+                Try: "Buy 100 shares of AAPL at $180"
               </div>
             </div>
           </div>
