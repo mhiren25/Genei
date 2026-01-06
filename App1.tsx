@@ -650,22 +650,19 @@ Would you like me to show more details about any specific holding or account?`;
         setChatHistory(prev => [...prev, assistantMessage]);
         } else {
           response = `I can help you with:\n\n📊 Portfolio Summary - "Show my portfolio"\n📰 Market News - "Latest news on AAPL"\n💼 Trading - "Buy 100 shares of MSFT"\n📈 Analysis - "Analyze my holdings"\n\nWhat would you like to do?`;
-          
-          const assistantMessage = {
-            type: 'assistant',
-            message: response,
-            timestamp: new Date().toISOString()
-          };
-          setChatHistory(prev => [...prev, assistantMessage]);
         }
       }
       
-      const assistantMessage = {
-        type: 'assistant',
-        message: response,
-        timestamp: new Date().toISOString()
-      };
-      setChatHistory(prev => [...prev, assistantMessage]);
+      // Send assistant message if response is set and hasn't been sent yet
+      if (response) {
+        const assistantMessage = {
+          type: 'assistant',
+          message: response,
+          timestamp: new Date().toISOString()
+        };
+        setChatHistory(prev => [...prev, assistantMessage]);
+      }
+      
       setIsProcessing(false);
     }, 800);
   };
